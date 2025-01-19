@@ -126,7 +126,7 @@ def set_section_node(kg: Driver, law_section: LawSection) -> None:
             MATCH (doc:Document {{id: $parent_id}})
             MERGE (section:{law_section.hierarchy.value[1]} {{id: $id}})
             SET section.level = $level, section.hierarchy_type = $hierarchy_type, section.title = $title, section.text = $text, section.page_num = $page_num
-            MERGE (section)-[:BELONGS_TO]->(doc)
+            MERGE (doc)-[:HAS_SECTION]->(section)
             RETURN section
         """
     elif law_section.parent and law_section.parent.hierarchy != LawHierarchyType.title:
@@ -134,7 +134,7 @@ def set_section_node(kg: Driver, law_section: LawSection) -> None:
             MATCH (parent:{law_section.parent.hierarchy.value[1]} {{id: $parent_id}})
             MERGE (section:{law_section.hierarchy.value[1]} {{id: $id}})
             SET section.level = $level, section.hierarchy_type = $hierarchy_type, section.title = $title, section.text = $text, section.page_num = $page_num
-            MERGE (section)-[:BELONGS_TO]->(parent)
+            MERGE (parent)-[:HAS_SECTION]->(section)
             RETURN section
         """
     else:
