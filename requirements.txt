@@ -1,2 +1,13 @@
-python-dotenv==1.0.1
+llmsherpa==0.1.4
 neo4j==5.27.0
+python-dotenv==1.0.1
+
+pymupdf==1.25.1
+pymupdf4llm==0.0.17
+pdfplumber==0.11.5
+pdfminer.six==20231228
+
+camelot-py==1.0.0
+
+
+markdown-it-py==3.0.0
