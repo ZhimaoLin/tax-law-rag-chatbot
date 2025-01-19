@@ -154,6 +154,14 @@ def set_section_node(kg: Driver, law_section: LawSection) -> None:
             page_num=law_section.page_num,
         )
 
+    add_embedding_cypher = f"""
+        MATCH (section:{law_section.hierarchy.value[1]} {{id: $id}})
+        WITH section, genai.vector.encode(section.title, 'OpenAI', {{token: $api_key}}) AS propertyVector
+        CALL db.create.setNodeVectorProperty(section, 'embedding', propertyVector)
+    """
+    with kg.session(database=Config.NEO4J_DATABASE) as session:
+        session.run(add_embedding_cypher, id=str(law_section.id), api_key=Config.OPENAI_API_KEY)
+
 
 def main():
     kg = connect_neo4j_db()
@@ -191,6 +199,18 @@ def main():
         else:
             set_section_node(kg, node)
 
+    for hierarchy in LawHierarchyType:
+        create_index_cypher = f"""
+            CREATE VECTOR INDEX `index_{hierarchy.value[1]}` IF NOT EXISTS
+            FOR (s: {hierarchy.value[1]}) ON (s.embedding)
+        """ + """
+            OPTIONS { indexConfig: {
+                `vector.dimensions`: 1536,
+                `vector.similarity_function`: 'cosine'
+            } }
+        """
+        with kg.session(database=Config.NEO4J_DATABASE) as session:
+            session.run(create_index_cypher)
+
 
 main()
-
