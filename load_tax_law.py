@@ -2,14 +2,14 @@ import pymupdf
 import re
 
 from models.neo4j_db import Neo4jDB
-from models.tax_law.law_hierarchy import LawHierarchyType
-from models.tax_law.law_section import LawSection
+from models.section import Section
+from models.hierarchy_type import HierarchyType
 
 
 PDF_PATH = "./data/code.pdf"
 
 
-def split_by_header(regex: str, text: str, page_num: int) -> tuple[str, list[LawSection]]:
+def split_by_header(regex: str, text: str, page_num: int) -> tuple[str, list[Section]]:
     match = re.split(regex, text)
     before = ""
     between = []
@@ -18,8 +18,9 @@ def split_by_header(regex: str, text: str, page_num: int) -> tuple[str, list[Law
         for i in range(1, len(match) - 1, 2):
             title = match[i]
             content = match[i + 1]
-            hierarchy_type = LawHierarchyType.check_hierarchy_type(title)
-            new_section = LawSection(hierarchy=hierarchy_type, title=title, text=content, page_num=page_num)
+            hierarchy = HierarchyType.check_hierarchy_type(title)
+            level = hierarchy.value[0]
+            new_section = Section(level=level, hierarchy=hierarchy, title=title, text=content, page_num=page_num)
             between.append(new_section)
     else:
         before = text
@@ -30,12 +31,17 @@ def main():
     neo4j_db = Neo4jDB()
     pdf = pymupdf.open(PDF_PATH)
 
-    head = LawSection(hierarchy=LawHierarchyType.document, title="INTERNAL REVENUE TITLE", page_num=0)
-    stack = [head]
-    neo4j_db.set_document_node_for_law_section(head)
+    print(f"Starting to load {len(pdf)} pages to Neo4j")
 
-    for i, page in enumerate(pdf[86:102]):
+    head = Section(
+        level=HierarchyType.document.value[0], hierarchy=HierarchyType.document, title="INTERNAL REVENUE TITLE", page_num=1
+    )
+    stack = [head]
+    neo4j_db.set_document_node(head)
+
+    for i, page in enumerate(pdf):
         page_num = i + 1
+        print(f"Processing page {page_num} of {len(pdf)}")
 
         text = page.get_text()
 
@@ -57,15 +63,20 @@ def main():
 
     while stack:
         node = stack.pop()
-        if node.hierarchy == LawHierarchyType.document:
-            neo4j_db.set_document_node_for_law_section(node)
+        if node.hierarchy == HierarchyType.document:
+            neo4j_db.set_document_node(node)
         else:
             neo4j_db.set_section_node(node)
 
-    for hierarchy in LawHierarchyType:
+    # Split into chunks
+    neo4j_db.create_chunk_node()
+
+    for hierarchy in HierarchyType:
         label = hierarchy.value[1]
         neo4j_db.add_embedding(label)
         neo4j_db.create_vector_index(label)
+
+    print(f"Finished loading {len(pdf)} pages to Neo4j")
 
 
 if __name__ == "__main__":

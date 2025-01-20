@@ -1,16 +1,10 @@
-# from langchain_neo4j import GraphCypherQAChain
-# from langchain_neo4j import Neo4jGraph
-# from langchain_community.vectorstores import Neo4jVector
-# from langchain.prompts.prompt import PromptTemplate
-# from langchain_openai import ChatOpenAI, OpenAIEmbeddings
-# from langchain_openai import OpenAIEmbeddings
-from uuid import UUID
 from neo4j import Driver, GraphDatabase
 from openai import OpenAI
 
 
 from config import Config
-from models.tax_law.law_hierarchy import LawHierarchyType
+from models.neo4j_db import Neo4jDB
+from models.hierarchy_type import HierarchyType
 from models.tax_law.law_section import LawSection
 
 
@@ -29,18 +23,12 @@ class GraphSearchResult(LawSection):
         return "Source:" + " -> ".join(source)
 
 
-def connect_neo4j_db() -> None:
-    kg = GraphDatabase.driver(Config.NEO4J_URI, auth=(Config.NEO4J_USERNAME, Config.NEO4J_PASSWORD))
-    kg.verify_connectivity()
-    return kg
-
-
 def convert_neo4j_node_to_law_section(node: dict) -> LawSection:
     id = node["id"]
     title = node["title"]
     text = node["text"]
     page_num = node["page_num"]
-    hierarchy = LawHierarchyType.check_hierarchy_type(title)
+    hierarchy = HierarchyType.check_hierarchy_type(title)
 
     return LawSection(
         id=id,
@@ -60,7 +48,7 @@ def neo4j_vector_search(question: str, kg: Driver) -> list[VectorSearchResult]:
     """
 
     with kg.session(database=Config.NEO4J_DATABASE) as session:
-        for hierarchy in LawHierarchyType:
+        for hierarchy in HierarchyType:
             index_name = f"index_{hierarchy.value[1]}"
 
             result = session.run(
@@ -87,7 +75,7 @@ def neo4j_vector_search(question: str, kg: Driver) -> list[VectorSearchResult]:
     return search_result_list
 
 
-def neo4j_search_path(query_id: str, hierarchy: LawHierarchyType, kg: Driver) -> list[LawSection]:
+def neo4j_search_path(query_id: str, hierarchy: HierarchyType, kg: Driver) -> list[LawSection]:
     path_result_list = []
     graph_search_query = f"""
         MATCH p = (doc:Document)-[*]->(node:{hierarchy.value[1]} {{id: $id}})
@@ -130,14 +118,13 @@ def neo4j_graph_search(node: VectorSearchResult, kg: Driver) -> list[GraphSearch
                     path=path,
                 )
 
-
                 search_result_list.append(graph_search_result)
 
     return search_result_list
 
 
 def main():
-    kg = connect_neo4j_db()
+    neo4j_db = Neo4jDB()
     openai_client = OpenAI()
 
     message_history = []
@@ -159,11 +146,13 @@ def main():
                 context_list.append(f"Assistant: {message['content']}")
         context = "\n".join(context_list)
 
-        question = f"{context[-50000:]}\nUser: {question}"
+        question = f"{context[-100000:]}\nUser: {question}"
 
         knowledge_base_list = []
 
         # Knowledge Base Search
+        neo4j_db.vector_search(question)
+
         vector_search = neo4j_vector_search(question, kg)
 
         for result in vector_search[:3]:

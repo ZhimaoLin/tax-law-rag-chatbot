@@ -3,9 +3,8 @@ from neo4j import GraphDatabase
 import uuid
 
 from config import Config
-from models.pdf_with_toc.section import Section
-from models.tax_law.law_hierarchy import LawHierarchyType
-from models.tax_law.law_section import LawSection
+from models.section import Section
+from models.hierarchy_type import HierarchyType
 
 
 class Neo4jDB:
@@ -14,54 +13,9 @@ class Neo4jDB:
         kg.verify_connectivity()
         self.kg = kg
 
-    def create_chunk_node_for_section(self) -> None:
-        query_all_sections = """
-            MATCH (section:Section)
-            RETURN section
-        """
-        with self.kg.session(database=Config.NEO4J_DATABASE) as session:
-            all_sections = session.run(query_all_sections)
-
-            for record in all_sections:
-                parent = record["section"]
-                parent_id = parent["id"]
-                level = parent["level"]
-                title = parent["title"]
-                text = parent["text"]
-                page_num = parent["page_num"]
-
-                if len(text) > 15000:
-                    text_splitter = CharacterTextSplitter.from_tiktoken_encoder(
-                        encoding_name="cl100k_base", chunk_size=1000, chunk_overlap=100
-                    )
-                    chunk_list = text_splitter.split_text(text)
-                    for chunk in chunk_list:
-                        create_chunk_cypher = """
-                            MERGE (chunk:Chunk {id: $id})
-                            ON CREATE SET chunk.level = $level, chunk.title = $title, chunk.text = $text, chunk.page_num = $page_num
-
-                            WITH chunk
-                            MATCH (parent:Section {id: $parent_id})
-                            SET parent.text = ""
-
-                            WITH chunk, parent
-                            MERGE (parent)-[:HAS_CHUNK]->(chunk)
-
-                            RETURN chunk
-                        """
-                        with self.kg.session(database=Config.NEO4J_DATABASE) as session:
-                            session.run(
-                                create_chunk_cypher,
-                                id=str(uuid.uuid4()),
-                                level=level + 1,
-                                title=title,
-                                text=chunk,
-                                page_num=page_num,
-                                parent_id=parent_id,
-                            )
-
-    def create_chunk_node_for_law_section(self, text: str, page_num: int, parent_id: str, parent_hierarchy: str) -> None:
-        for hierarchy in LawHierarchyType:
+    # region Split Text
+    def create_chunk_node(self) -> None:
+        for hierarchy in HierarchyType:
             query_all_law_section = f"""
                 MATCH (section:{hierarchy.value[1]})
                 RETURN section
@@ -73,10 +27,9 @@ class Neo4jDB:
                 for record in all_law_sections:
                     parent = record["section"]
                     parent_id = parent["id"]
-                    title = parent["title"]
                     text = parent["text"]
                     page_num = parent["page_num"]
-                    hierarchy_type = parent["hierarchy_type"]
+                    hierarchy = parent["hierarchy"]
 
                     if len(text) > 15000:
                         text_splitter = CharacterTextSplitter.from_tiktoken_encoder(
@@ -86,10 +39,10 @@ class Neo4jDB:
                         for chunk in chunk_list:
                             create_chunk_cypher = f"""
                                 MERGE (chunk:Chunk {{id: $id}})
-                                ON CREATE SET chunk.level = $level, hierarchy_type = $hierarchy_type, chunk.title = $title, chunk.text = $text, chunk.page_num = $page_num
+                                ON CREATE SET chunk.level = $level, hierarchy = $hierarchy, chunk.title = $title, chunk.text = $text, chunk.page_num = $page_num
 
                                 WITH chunk
-                                MATCH (parent:{hierarchy_type} {{id: $parent_id}})
+                                MATCH (parent:{hierarchy} {{id: $parent_id}})
                                 SET parent.text = ""
 
                                 WITH chunk, parent
@@ -101,13 +54,67 @@ class Neo4jDB:
                                 session.run(
                                     create_chunk_cypher,
                                     id=str(uuid.uuid4()),
-                                    level=LawHierarchyType.chunk.value[0],
-                                    hierarchy_type=LawHierarchyType.chunk.value[1],
+                                    level=HierarchyType.chunk.value[0],
+                                    hierarchy=HierarchyType.chunk.value[1],
                                     title="",  # title is not needed for chunk
                                     text=chunk,
                                     page_num=page_num,
                                     parent_id=parent_id,
                                 )
+
+    # endregion
+
+    # region Add Nodes
+    def set_document_node(self, law_section: Section) -> None:
+        set_document_cypher = """
+            MERGE (doc:Document {id: $id})
+            SET doc.level = $level, doc.hierarchy = $hierarchy, doc.title = $title, doc.text = $text, doc.page_num = $page_num
+            RETURN doc
+        """
+        with self.kg.session(database=Config.NEO4J_DATABASE) as session:
+            session.run(
+                set_document_cypher,
+                id=str(law_section.id),
+                level=HierarchyType.document.value[0],
+                hierarchy=HierarchyType.document.value[1],
+                title=law_section.title,
+                text=law_section.text,
+                page_num=law_section.page_num,
+            )
+
+    def set_section_node(self, section: Section) -> None:
+        if section.parent and section.hierarchy == HierarchyType.document:
+            set_section_cypher = f"""
+                MATCH (doc:Document {{id: $parent_id}})
+                MERGE (section:{section.hierarchy.value[1]} {{id: $id}})
+                SET section.level = $level, section.hierarchy = $hierarchy, section.title = $title, section.text = $text, section.page_num = $page_num
+                MERGE (doc)-[:HAS_SECTION]->(section)
+                RETURN section
+            """
+        elif section.parent and section.parent.level > 0:
+            set_section_cypher = f"""
+                MATCH (parent:{section.parent.hierarchy.value[1]} {{id: $parent_id}})
+                MERGE (section:{section.hierarchy.value[1]} {{id: $id}})
+                SET section.level = $level, section.hierarchy = $hierarchy, section.title = $title, section.text = $text, section.page_num = $page_num
+                MERGE (parent)-[:HAS_SECTION]->(section)
+                RETURN section
+            """
+        else:
+            raise ValueError("Section must have a parent")
+
+        with self.kg.session(database=Config.NEO4J_DATABASE) as session:
+            session.run(
+                set_section_cypher,
+                parent_id=str(section.parent.id),
+                id=str(section.id),
+                level=section.level,
+                hierarchy=section.hierarchy.value[1],
+                title=section.title,
+                text=section.text,
+                page_num=section.page_num,
+            )
+
+    # endregion
 
     # region Embedding
     def add_embedding(self, label: str):
@@ -144,104 +151,60 @@ class Neo4jDB:
 
     # endregion
 
-    # region Tax Law
-    def set_document_node_for_law_section(self, law_section: LawSection) -> None:
-        set_document_cypher = """
-            MERGE (doc:Document {id: $id})
-            SET doc.level = $level, doc.hierarchy_type = $hierarchy_type, doc.title = $title, doc.text = $text, doc.page_num = $page_num
-            RETURN doc
+    # region Search
+    def vector_search(self, question: str, label: str) -> list[tuple[float, str, str, str, int]]:
+        search_result_list = []
+        vector_search_query = """
+            WITH genai.vector.encode($question, 'OpenAI', {token: $openai_key}) AS question_embedding
+            CALL db.index.vector.queryNodes($index_name, $top_k, question_embedding) YIELD node, score
+            RETURN score, node.id, node.level, node.title, node.text, node.page_num
         """
-        with self.kg.session(database=Config.NEO4J_DATABASE) as session:
-            session.run(
-                set_document_cypher,
-                id=str(law_section.id),
-                level=LawHierarchyType.document.value[0],
-                hierarchy_type=LawHierarchyType.document.value[1],
-                title=law_section.title,
-                text=law_section.text,
-                page_num=law_section.page_num,
-            )
-
-    def set_section_node_for_law_section(self, law_section: LawSection) -> None:
-        if law_section.parent and law_section.parent.hierarchy == LawHierarchyType.document:
-            set_section_cypher = f"""
-                MATCH (doc:Document {{id: $parent_id}})
-                MERGE (section:{law_section.hierarchy.value[1]} {{id: $id}})
-                SET section.level = $level, section.hierarchy_type = $hierarchy_type, section.title = $title, section.text = $text, section.page_num = $page_num
-                MERGE (doc)-[:HAS_SECTION]->(section)
-                RETURN section
-            """
-        elif law_section.parent and law_section.parent.hierarchy != LawHierarchyType.document:
-            set_section_cypher = f"""
-                MATCH (parent:{law_section.parent.hierarchy.value[1]} {{id: $parent_id}})
-                MERGE (section:{law_section.hierarchy.value[1]} {{id: $id}})
-                SET section.level = $level, section.hierarchy_type = $hierarchy_type, section.title = $title, section.text = $text, section.page_num = $page_num
-                MERGE (parent)-[:HAS_SECTION]->(section)
-                RETURN section
-            """
-        else:
-            raise ValueError("Section must have a parent")
 
         with self.kg.session(database=Config.NEO4J_DATABASE) as session:
-            session.run(
-                set_section_cypher,
-                parent_id=str(law_section.parent.id),
-                id=str(law_section.id),
-                level=law_section.hierarchy.value[0],
-                hierarchy_type=law_section.hierarchy.value[1],
-                title=law_section.title,
-                text=law_section.text,
-                page_num=law_section.page_num,
+            search_result_list = []
+            index_name = f"index_{label}"
+
+            result = session.run(
+                vector_search_query,
+                question=question,
+                openai_key=Config.OPENAI_API_KEY,
+                index_name=index_name,
+                top_k=2,
             )
+            for node in result:
+                score = node[0]
+                id = node[1]
+                title = node[3]
+                text = node[4]
+                page_num = node[5]
 
-    # endregion
+                search_result_list.append((score, id, title, text, page_num))
 
-    # region PDF with TOC
-    def set_document_node_for_section(self, section: Section) -> None:
-        set_document_cypher = """
-            MERGE (doc:Document {id: $id})
-            SET doc.level = $level, doc.title = $title, doc.text = $text, doc.page_num = $page_num
-            RETURN doc
+        search_result_list.sort(key=lambda x: x[0], reverse=True)
+        return search_result_list
+
+    def search_path(self, query_id: str, label: str) -> list[dict]:
+        graph_search_query = f"""
+            MATCH p = (doc:Document)-[*]->(node:{label} {{id: $id}})
+            RETURN nodes(p) AS all_nodes
         """
-        with self.kg.session(database=Config.NEO4J_DATABASE) as session:
-            session.run(
-                set_document_cypher,
-                id=str(section.id),
-                level=0,
-                title=section.title,
-                text=section.text,
-                page_num=section.page_num,
-            )
-
-    def set_section_node_for_section(self, section: Section) -> None:
-        if section.parent and section.parent.level == 0:
-            set_section_cypher = """
-                MATCH (doc:Document {id: $parent_id})
-                MERGE (section:Section {id: $id})
-                SET section.level = $level, section.title = $title, section.text = $text, section.page_num = $page_num
-                MERGE (doc)-[:HAS_SECTION]->(section)
-                RETURN section
-            """
-        elif section.parent and section.parent.level > 0:
-            set_section_cypher = """
-                MATCH (parent:Section {id: $parent_id})
-                MERGE (section:Section {id: $id})
-                SET section.level = $level, section.title = $title, section.text = $text, section.page_num = $page_num
-                MERGE (parent)-[:HAS_SECTION]->(section)
-                RETURN section
-            """
-        else:
-            raise ValueError("Section must have a parent")
 
         with self.kg.session(database=Config.NEO4J_DATABASE) as session:
-            session.run(
-                set_section_cypher,
-                parent_id=str(section.parent.id),
-                id=str(section.id),
-                level=section.level,
-                title=section.title,
-                text=section.text,
-                page_num=section.page_num,
-            )
+            result = session.run(graph_search_query, id=str(query_id))
+            for record in result:
+                return record["all_nodes"]
+        return []
+
+    def graph_search(self, query_id: str, label: str) -> list[dict]:
+        graph_search_query = f"""
+            MATCH p = (node:{label} {{id: $id}})-[*]->(end)
+            RETURN nodes(p) AS all_nodes
+        """
+
+        with self.kg.session(database=Config.NEO4J_DATABASE) as session:
+            result = session.run(graph_search_query, id=str(query_id))
+            for i in result:
+                return i["all_nodes"]
+        return []
 
     # endregion

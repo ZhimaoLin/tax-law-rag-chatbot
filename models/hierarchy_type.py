@@ -3,7 +3,7 @@ import re
 from typing import Self
 
 
-class LawHierarchyType(Enum):
+class HierarchyType(Enum):
     document = (0, "Document")
     subtitle = (1, "Subtitle")
     chapter = (2, "Chapter")

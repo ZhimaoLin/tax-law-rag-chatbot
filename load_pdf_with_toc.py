@@ -2,7 +2,8 @@ import pymupdf4llm
 import re
 
 from models.neo4j_db import Neo4jDB
-from models.pdf_with_toc.section import Section
+from models.section import Section
+from models.hierarchy_type import HierarchyType
 
 
 PDF_PATH = "./data/instruction.pdf"
@@ -23,10 +24,10 @@ def connect_new_section(stack: list[Section], new_section: Section, neo4j_db: Ne
     else:
         while new_section.level <= stack[-1].level:
             node = stack.pop()
-            neo4j_db.set_section_node_for_section(node)
+            neo4j_db.set_section_node(node)
         new_section.parent = stack[-1]
     stack.append(new_section)
-    neo4j_db.set_section_node_for_section(new_section)
+    neo4j_db.set_section_node(new_section)
 
 
 def main():
@@ -36,12 +37,16 @@ def main():
 
     print(f"Starting to load {len(markdown)} pages to Neo4j")
 
-    head = Section(level=0, page_num=0)
+    head = Section(
+        level=HierarchyType.document.value[0], hierarchy=HierarchyType.document, page_num=1, title="1040 Instructions"
+    )
     stack = [head]
-    neo4j_db.set_document_node_for_section(head)
+    neo4j_db.set_document_node(head)
 
     for page in markdown:
         page_num = page["metadata"]["page"]
+        print(f"Processing page {page_num} of {len(markdown)}")
+
         text = page["text"]
         toc = page["toc_items"]
 
@@ -77,9 +82,9 @@ def main():
     while stack:
         node = stack.pop()
         if node.level > 0:
-            neo4j_db.set_section_node_for_section(node)
+            neo4j_db.set_section_node(node)
         else:
-            neo4j_db.set_document_node_for_section(node)
+            neo4j_db.set_document_node(node)
 
     # splitting chunks
     neo4j_db.create_chunk_node_for_section()
@@ -89,7 +94,7 @@ def main():
     neo4j_db.create_vector_index(label="Document")
     neo4j_db.create_vector_index(label="Section")
 
-    # print(f"Finished loading {len(markdown)} pages to Neo4j")
+    print(f"Finished loading {len(markdown)} pages to Neo4j")
 
 
 if __name__ == "__main__":

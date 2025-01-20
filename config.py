@@ -14,4 +14,4 @@ class Config:
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
     VECTOR_SOURCE_PROPERTY = "text"
-    VECTOR_EMBEDDING_PROPERTY = "embedding"
+    VECTOR_EMBEDDING_PROPERTY = "text_embedding"
