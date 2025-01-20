@@ -7,7 +7,7 @@ from config import Config
 from models.pinecone_db import PineconeDB
 
 
-PDF_PATH = "./data/test_code.pdf"
+PDF_PATH = "./data/test.pdf"
 
 
 def main():
