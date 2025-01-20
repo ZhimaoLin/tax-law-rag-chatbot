@@ -4,7 +4,7 @@ from typing import Self
 
 
 class LawHierarchyType(Enum):
-    title = (0, "Title")
+    document = (0, "Document")
     subtitle = (1, "Subtitle")
     chapter = (2, "Chapter")
     subchapter = (3, "Subchapter")
@@ -45,4 +45,4 @@ class LawHierarchyType(Enum):
         elif re.match(r"\([i|v|x]+\) ", title):
             return self.section_l4
         else:
-            raise ValueError("Unknown Hierarchy Type")
+            return self.document

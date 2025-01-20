@@ -18,10 +18,37 @@ class VectorSearchResult(LawSection):
     score: float
 
 
+class GraphSearchResult(LawSection):
+    path: list[LawSection]
+
+    def show_source(self) -> str:
+        self.path.sort(key=lambda x: x.hierarchy.value[0])
+        source = []
+        for section in self.path:
+            source.append(section.title)
+        return "Source:" + " -> ".join(source)
+
+
 def connect_neo4j_db() -> None:
     kg = GraphDatabase.driver(Config.NEO4J_URI, auth=(Config.NEO4J_USERNAME, Config.NEO4J_PASSWORD))
     kg.verify_connectivity()
     return kg
+
+
+def convert_neo4j_node_to_law_section(node: dict) -> LawSection:
+    id = node["id"]
+    title = node["title"]
+    text = node["text"]
+    page_num = node["page_num"]
+    hierarchy = LawHierarchyType.check_hierarchy_type(title)
+
+    return LawSection(
+        id=id,
+        title=title,
+        text=text,
+        page_num=page_num,
+        hierarchy=hierarchy,
+    )
 
 
 def neo4j_vector_search(question: str, kg: Driver) -> list[VectorSearchResult]:
@@ -44,48 +71,68 @@ def neo4j_vector_search(question: str, kg: Driver) -> list[VectorSearchResult]:
                 top_k=2,
             )
             for node in result:
+                score = node[0]
+                id = node[1]
+                title = node[3]
+                text = node[4]
+                page_num = node[5]
+
                 search_result = VectorSearchResult(
-                    score=node[0],
-                    id=node[1],
-                    level=node[2],
-                    title=node[3],
-                    text=node[4],
-                    page_num=node[5],
-                    hierarchy=hierarchy,
+                    score=score, id=id, title=title, text=text, page_num=page_num, hierarchy=hierarchy
                 )
+
                 search_result_list.append(search_result)
 
     search_result_list.sort(key=lambda x: x.score, reverse=True)
     return search_result_list
 
 
-def neo4j_graph_search(node: VectorSearchResult, kg: Driver) -> list[LawSection]:
-    search_result_list = []
+def neo4j_search_path(query_id: str, hierarchy: LawHierarchyType, kg: Driver) -> list[LawSection]:
+    path_result_list = []
+    graph_search_query = f"""
+        MATCH p = (doc:Document)-[*]->(node:{hierarchy.value[1]} {{id: $id}})
+        RETURN nodes(p) AS all_nodes
+    """
 
+    with kg.session(database=Config.NEO4J_DATABASE) as session:
+        result = session.run(graph_search_query, id=str(query_id))
+        for i in result:
+            for node in i["all_nodes"]:
+                new_node = convert_neo4j_node_to_law_section(node)
+                path_result_list.append(new_node)
+
+    path_result_list.sort(key=lambda x: x.hierarchy.value[0])
+    return path_result_list
+
+
+def neo4j_graph_search(node: VectorSearchResult, kg: Driver) -> list[GraphSearchResult]:
+    search_result_list = []
+    # 1479f936-cf52-419f-bb8e-9a2b5abf2849
     graph_search_query = f"""
         MATCH p = (node:{node.hierarchy.value[1]} {{id: $id}})-[*]->(end)
-        WITH nodes(p) AS all_nodes
-        UNWIND all_nodes AS target_node
-        RETURN
-            target_node.id AS id,
-            target_node.level AS level,
-            target_node.title AS title,
-            target_node.text AS text,
-            target_node.page_num AS page_num
+        RETURN nodes(p) AS all_nodes
     """
 
     with kg.session(database=Config.NEO4J_DATABASE) as session:
         result = session.run(graph_search_query, id=str(node.id))
-        for node in result:
-            search_result = LawSection(
-                id=node[0],
-                level=node[1],
-                title=node[2],
-                text=node[3],
-                page_num=node[4],
-                hierarchy=LawHierarchyType.check_hierarchy_type(node[2]),
-            )
-            search_result_list.append(search_result)
+        for i in result:
+            for node in i["all_nodes"]:
+                search_result = convert_neo4j_node_to_law_section(node)
+
+                path = neo4j_search_path(search_result.id, search_result.hierarchy, kg)
+
+                graph_search_result = GraphSearchResult(
+                    id=search_result.id,
+                    title=search_result.title,
+                    text=search_result.text,
+                    page_num=search_result.page_num,
+                    hierarchy=search_result.hierarchy,
+                    path=path,
+                )
+
+
+                search_result_list.append(graph_search_result)
+
     return search_result_list
 
 
@@ -100,6 +147,7 @@ def main():
     while True:
         print("=====================================")
         question = input("Enter a question or type 'exit' to quit: ")
+        question = "How is the tax imposed for married couples?"
         if question.lower() == "exit":
             return
 
@@ -111,26 +159,31 @@ def main():
                 context_list.append(f"Assistant: {message['content']}")
         context = "\n".join(context_list)
 
-        question = f"{context}\nUser: {question}"
+        question = f"{context[-50000:]}\nUser: {question}"
 
         knowledge_base_list = []
 
         # Knowledge Base Search
         vector_search = neo4j_vector_search(question, kg)
-        for result in vector_search[:5]:
+
+        for result in vector_search[:3]:
             graph_search = neo4j_graph_search(result, kg)
 
             for section in graph_search:
                 knowledge_base_list.append(section.text)
+                knowledge_base_list.append(section.show_source())
+                knowledge_base_list.append(f"Page Number: {section.page_num}")
 
         knowledge_base = "\n".join(knowledge_base_list)
 
         user_message = f"""
             I need help with a tax question. Here is my question: {question}
 
-            Please only answer the question based on the following knowledge base:
+            Please only answer the question based on the following knowledge base. I put the source path and page number below each source. If you think that source is useful for the answer, please attach the source path and page number to the answer at the end (it can be multiple sources and pages).
             {knowledge_base}
 
+            Attach the source path and page number at the end of your answer if you think it is useful.
+            If you do not have enough reliable source from the knowledge base, just leave the source part blank. Do not make up any information.
             If you don't know the answer, you can say 'I don't know.'
         """
         message_history.append({"role": "user", "content": user_message})
