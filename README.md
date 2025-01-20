@@ -2,9 +2,6 @@
 
 An AI-powered tax lawyer/accountant that can answer tax related questions for clients. Behind the scene, there are 2 knowledge bases: a vector knowledge base using [Pinecone](https://www.pinecone.io/) and a graph knowledge base using [Neo4j](https://neo4j.com/). 
 
-## Quick Demo
-
-
 
 ## Objectives
 
