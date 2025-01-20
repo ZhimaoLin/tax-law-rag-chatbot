@@ -31,9 +31,11 @@ class Neo4jDB:
                     page_num = parent["page_num"]
                     hierarchy = parent["hierarchy"]
 
-                    if len(text) > 15000:
+                    if len(text) > 10000:
                         text_splitter = CharacterTextSplitter.from_tiktoken_encoder(
-                            encoding_name="cl100k_base", chunk_size=1000, chunk_overlap=100
+                            encoding_name=Config.TOKEN_ENCODING,
+                            chunk_size=Config.CHUNK_SIZE,
+                            chunk_overlap=Config.OVERLAP_SIZE,
                         )
                         chunk_list = text_splitter.split_text(text)
                         for chunk in chunk_list:
@@ -122,9 +124,9 @@ class Neo4jDB:
             MATCH (section:{label})
             WITH section, genai.vector.encode(
                 CASE
-                    WHEN section.text IS NOT NULL AND section.text <> ''
-                    THEN section.text
-                    ELSE section.title
+                    WHEN section.text IS NOT NULL AND section.text <> '' THEN section.text
+                    WHEN section.title IS NOT NULL AND section.title <> '' THEN section.title
+                    ELSE ' '
                 END,
                 'OpenAI',
                 {{token: $api_key}}) AS propertyVector
@@ -157,7 +159,7 @@ class Neo4jDB:
         vector_search_query = """
             WITH genai.vector.encode($question, 'OpenAI', {token: $openai_key}) AS question_embedding
             CALL db.index.vector.queryNodes($index_name, $top_k, question_embedding) YIELD node, score
-            RETURN score, node.id, node.level, node.title, node.text, node.page_num
+            RETURN score, node.id, node.level, node.hierarchy, node.title, node.text, node.page_num
         """
 
         with self.kg.session(database=Config.NEO4J_DATABASE) as session:
@@ -174,16 +176,18 @@ class Neo4jDB:
             for node in result:
                 score = node[0]
                 id = node[1]
+                level = node[2]
+                hierarchy = node[3]
                 title = node[3]
                 text = node[4]
                 page_num = node[5]
 
-                search_result_list.append((score, id, title, text, page_num))
+                search_result_list.append((score, id, level, hierarchy, title, text, page_num))
 
         search_result_list.sort(key=lambda x: x[0], reverse=True)
         return search_result_list
 
-    def search_path(self, query_id: str, label: str) -> list[dict]:
+    def search_path(self, query_id: str, label: str) -> list[Section]:
         graph_search_query = f"""
             MATCH p = (doc:Document)-[*]->(node:{label} {{id: $id}})
             RETURN nodes(p) AS all_nodes
@@ -192,10 +196,12 @@ class Neo4jDB:
         with self.kg.session(database=Config.NEO4J_DATABASE) as session:
             result = session.run(graph_search_query, id=str(query_id))
             for record in result:
-                return record["all_nodes"]
+                path = [self.__convert_neo4j_node_to_section(node) for node in record["all_nodes"]]
+                path.sort(key=lambda x: x.level)
+                return path
         return []
 
-    def graph_search(self, query_id: str, label: str) -> list[dict]:
+    def graph_search(self, query_id: str, label: str) -> list[Section]:
         graph_search_query = f"""
             MATCH p = (node:{label} {{id: $id}})-[*]->(end)
             RETURN nodes(p) AS all_nodes
@@ -203,8 +209,24 @@ class Neo4jDB:
 
         with self.kg.session(database=Config.NEO4J_DATABASE) as session:
             result = session.run(graph_search_query, id=str(query_id))
-            for i in result:
-                return i["all_nodes"]
+            for record in result:
+                return [self.__convert_neo4j_node_to_section(node) for node in record["all_nodes"]]
         return []
 
     # endregion
+
+    def __convert_neo4j_node_to_section(self, node: dict) -> Section:
+        id = node["id"]
+        title = node["title"]
+        level = node["level"]
+        hierarchy = HierarchyType.check_hierarchy_type(title)
+        text = node["text"]
+        page_num = node["page_num"]
+        return Section(
+            id=id,
+            level=level,
+            hierarchy=hierarchy,
+            title=title,
+            text=text,
+            page_num=page_num,
+        )
