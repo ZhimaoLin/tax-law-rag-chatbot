@@ -1,70 +1,43 @@
-from enum import Enum
 from neo4j import Driver, GraphDatabase
-from pydantic import BaseModel, Field
 import pymupdf
 import re
-from typing import Self
-import uuid
 
 from config import Config
+from models.tax_law.law_hierarchy import LawHierarchyType
+from models.tax_law.law_section import LawSection
 
 
 PDF_PATH = "./data/code.pdf"
 LLMSHERPA_API_URL = "http://localhost:5010/api/parseDocument?renderFormat=all"
 
 
-class LawHierarchyType(Enum):
-    title = (0, "Title")
-    subtitle = (1, "Subtitle")
-    chapter = (2, "Chapter")
-    subchapter = (3, "Subchapter")
-    part = (4, "Part")
-    section = (5, "Section")
-    section_l1 = (6, "SectionL1")
-    section_l2 = (7, "SectionL2")
-    section_l3 = (8, "SectionL3")
-    section_l4 = (9, "SectionL4")
-    table_of_contents = (5, "TableOfContents")
-    editorial_notes = (5, "EditorialNotes")
-    amendments = (6, "Amendments")
-
-
-class LawSection(BaseModel):
-    id: uuid.UUID = Field(default_factory=uuid.uuid4)
-    hierarchy: LawHierarchyType
-    title: str = ""
-    text: str = ""
-    page_num: int
-    parent: Self = None
-
-
-def check_hierarchy_type(title: str) -> LawHierarchyType:
-    if "subtitle" in title.lower():
-        return LawHierarchyType.subtitle
-    elif "chapter" in title.lower():
-        return LawHierarchyType.chapter
-    elif "subchapter" in title.lower():
-        return LawHierarchyType.subchapter
-    elif "part" in title.lower():
-        return LawHierarchyType.part
-    elif "§" in title:
-        return LawHierarchyType.section
-    elif "table of contents" in title.lower():
-        return LawHierarchyType.table_of_contents
-    elif "editorial notes" in title.lower():
-        return LawHierarchyType.editorial_notes
-    elif "amendments" in title.lower():
-        return LawHierarchyType.amendments
-    elif re.match(r"\([a-z]\) [A-Z0-9]+", title):
-        return LawHierarchyType.section_l1
-    elif re.match(r"\(\d+\) [A-Z0-9]+", title):
-        return LawHierarchyType.section_l2
-    elif re.match(r"\([A-Z]\) [A-Z0-9]+", title):
-        return LawHierarchyType.section_l3
-    elif re.match(r"\([i|v|x]+\) ", title):
-        return LawHierarchyType.section_l4
-    else:
-        raise ValueError("Unknown Hierarchy Type")
+# def check_hierarchy_type(title: str) -> LawHierarchyType:
+#     if "subtitle" in title.lower():
+#         return LawHierarchyType.subtitle
+#     elif "chapter" in title.lower():
+#         return LawHierarchyType.chapter
+#     elif "subchapter" in title.lower():
+#         return LawHierarchyType.subchapter
+#     elif "part" in title.lower():
+#         return LawHierarchyType.part
+#     elif "§" in title:
+#         return LawHierarchyType.section
+#     elif "table of contents" in title.lower():
+#         return LawHierarchyType.table_of_contents
+#     elif "editorial notes" in title.lower():
+#         return LawHierarchyType.editorial_notes
+#     elif "amendments" in title.lower():
+#         return LawHierarchyType.amendments
+#     elif re.match(r"\([a-z]\) [A-Z0-9]+", title):
+#         return LawHierarchyType.section_l1
+#     elif re.match(r"\(\d+\) [A-Z0-9]+", title):
+#         return LawHierarchyType.section_l2
+#     elif re.match(r"\([A-Z]\) [A-Z0-9]+", title):
+#         return LawHierarchyType.section_l3
+#     elif re.match(r"\([i|v|x]+\) ", title):
+#         return LawHierarchyType.section_l4
+#     else:
+#         raise ValueError("Unknown Hierarchy Type")
 
 
 def split_by_header(regex: str, text: str, page_num: int) -> tuple[str, list[LawSection]]:
@@ -76,7 +49,7 @@ def split_by_header(regex: str, text: str, page_num: int) -> tuple[str, list[Law
         for i in range(1, len(match) - 1, 2):
             title = match[i]
             content = match[i + 1]
-            hierarchy_type = check_hierarchy_type(title)
+            hierarchy_type = LawHierarchyType.check_hierarchy_type(title)
             new_section = LawSection(hierarchy=hierarchy_type, title=title, text=content, page_num=page_num)
             between.append(new_section)
     else:
@@ -208,15 +181,18 @@ def main():
             session.run(add_embedding_cypher, api_key=Config.OPENAI_API_KEY)
 
     for hierarchy in LawHierarchyType:
-        create_index_cypher = f"""
+        create_index_cypher = (
+            f"""
             CREATE VECTOR INDEX `index_{hierarchy.value[1]}` IF NOT EXISTS
             FOR (s: {hierarchy.value[1]}) ON (s.{Config.VECTOR_EMBEDDING_PROPERTY})
-        """ + """
+        """
+            + """
             OPTIONS { indexConfig: {
                 `vector.dimensions`: 1536,
                 `vector.similarity_function`: 'cosine'
             } }
         """
+        )
         with kg.session(database=Config.NEO4J_DATABASE) as session:
             session.run(create_index_cypher)
 
