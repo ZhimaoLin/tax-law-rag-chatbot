@@ -17,6 +17,7 @@ class LawHierarchyType(Enum):
     table_of_contents = (5, "TableOfContents")
     editorial_notes = (5, "EditorialNotes")
     amendments = (6, "Amendments")
+    chunk = (10, "Chunk")
 
     @classmethod
     def check_hierarchy_type(self, title: str) -> Self:
@@ -44,5 +45,7 @@ class LawHierarchyType(Enum):
             return self.section_l3
         elif re.match(r"\([i|v|x]+\) ", title):
             return self.section_l4
+        elif "chunk" in title.lower():
+            return self.chunk
         else:
             return self.document

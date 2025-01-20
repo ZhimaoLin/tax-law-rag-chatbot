@@ -1,4 +1,6 @@
+from langchain_text_splitters import CharacterTextSplitter
 from neo4j import GraphDatabase
+import uuid
 
 from config import Config
 from models.pdf_with_toc.section import Section
@@ -11,6 +13,101 @@ class Neo4jDB:
         kg = GraphDatabase.driver(Config.NEO4J_URI, auth=(Config.NEO4J_USERNAME, Config.NEO4J_PASSWORD))
         kg.verify_connectivity()
         self.kg = kg
+
+    def create_chunk_node_for_section(self) -> None:
+        query_all_sections = """
+            MATCH (section:Section)
+            RETURN section
+        """
+        with self.kg.session(database=Config.NEO4J_DATABASE) as session:
+            all_sections = session.run(query_all_sections)
+
+            for record in all_sections:
+                parent = record["section"]
+                parent_id = parent["id"]
+                level = parent["level"]
+                title = parent["title"]
+                text = parent["text"]
+                page_num = parent["page_num"]
+
+                if len(text) > 15000:
+                    text_splitter = CharacterTextSplitter.from_tiktoken_encoder(
+                        encoding_name="cl100k_base", chunk_size=1000, chunk_overlap=100
+                    )
+                    chunk_list = text_splitter.split_text(text)
+                    for chunk in chunk_list:
+                        create_chunk_cypher = """
+                            MERGE (chunk:Chunk {id: $id})
+                            ON CREATE SET chunk.level = $level, chunk.title = $title, chunk.text = $text, chunk.page_num = $page_num
+
+                            WITH chunk
+                            MATCH (parent:Section {id: $parent_id})
+                            SET parent.text = ""
+
+                            WITH chunk, parent
+                            MERGE (parent)-[:HAS_CHUNK]->(chunk)
+
+                            RETURN chunk
+                        """
+                        with self.kg.session(database=Config.NEO4J_DATABASE) as session:
+                            session.run(
+                                create_chunk_cypher,
+                                id=str(uuid.uuid4()),
+                                level=level + 1,
+                                title=title,
+                                text=chunk,
+                                page_num=page_num,
+                                parent_id=parent_id,
+                            )
+
+    def create_chunk_node_for_law_section(self, text: str, page_num: int, parent_id: str, parent_hierarchy: str) -> None:
+        for hierarchy in LawHierarchyType:
+            query_all_law_section = f"""
+                MATCH (section:{hierarchy.value[1]})
+                RETURN section
+            """
+
+            with self.kg.session(database=Config.NEO4J_DATABASE) as session:
+                all_law_sections = session.run(query_all_law_section)
+
+                for record in all_law_sections:
+                    parent = record["section"]
+                    parent_id = parent["id"]
+                    title = parent["title"]
+                    text = parent["text"]
+                    page_num = parent["page_num"]
+                    hierarchy_type = parent["hierarchy_type"]
+
+                    if len(text) > 15000:
+                        text_splitter = CharacterTextSplitter.from_tiktoken_encoder(
+                            encoding_name="cl100k_base", chunk_size=1000, chunk_overlap=100
+                        )
+                        chunk_list = text_splitter.split_text(text)
+                        for chunk in chunk_list:
+                            create_chunk_cypher = f"""
+                                MERGE (chunk:Chunk {{id: $id}})
+                                ON CREATE SET chunk.level = $level, hierarchy_type = $hierarchy_type, chunk.title = $title, chunk.text = $text, chunk.page_num = $page_num
+
+                                WITH chunk
+                                MATCH (parent:{hierarchy_type} {{id: $parent_id}})
+                                SET parent.text = ""
+
+                                WITH chunk, parent
+                                MERGE (parent)-[:HAS_CHUNK]->(chunk)
+
+                                RETURN chunk
+                            """
+                            with self.kg.session(database=Config.NEO4J_DATABASE) as session:
+                                session.run(
+                                    create_chunk_cypher,
+                                    id=str(uuid.uuid4()),
+                                    level=LawHierarchyType.chunk.value[0],
+                                    hierarchy_type=LawHierarchyType.chunk.value[1],
+                                    title="",  # title is not needed for chunk
+                                    text=chunk,
+                                    page_num=page_num,
+                                    parent_id=parent_id,
+                                )
 
     # region Embedding
     def add_embedding(self, label: str):
@@ -65,7 +162,7 @@ class Neo4jDB:
                 page_num=law_section.page_num,
             )
 
-    def set_section_node(self, law_section: LawSection) -> None:
+    def set_section_node_for_law_section(self, law_section: LawSection) -> None:
         if law_section.parent and law_section.parent.hierarchy == LawHierarchyType.document:
             set_section_cypher = f"""
                 MATCH (doc:Document {{id: $parent_id}})
@@ -116,7 +213,7 @@ class Neo4jDB:
                 page_num=section.page_num,
             )
 
-    def set_section_node(self, section: Section) -> None:
+    def set_section_node_for_section(self, section: Section) -> None:
         if section.parent and section.parent.level == 0:
             set_section_cypher = """
                 MATCH (doc:Document {id: $parent_id})

@@ -1,7 +1,6 @@
 import pymupdf4llm
 import re
 
-
 from models.neo4j_db import Neo4jDB
 from models.pdf_with_toc.section import Section
 
@@ -24,16 +23,18 @@ def connect_new_section(stack: list[Section], new_section: Section, neo4j_db: Ne
     else:
         while new_section.level <= stack[-1].level:
             node = stack.pop()
-            neo4j_db.set_section_node(node)
+            neo4j_db.set_section_node_for_section(node)
         new_section.parent = stack[-1]
     stack.append(new_section)
-    neo4j_db.set_section_node(new_section)
+    neo4j_db.set_section_node_for_section(new_section)
 
 
 def main():
     neo4j_db = Neo4jDB()
 
     markdown = pymupdf4llm.to_markdown(doc=PDF_PATH, page_chunks=True)
+
+    print(f"Starting to load {len(markdown)} pages to Neo4j")
 
     head = Section(level=0, page_num=0)
     stack = [head]
@@ -76,14 +77,19 @@ def main():
     while stack:
         node = stack.pop()
         if node.level > 0:
-            neo4j_db.set_section_node(node)
+            neo4j_db.set_section_node_for_section(node)
         else:
             neo4j_db.set_document_node_for_section(node)
+
+    # splitting chunks
+    neo4j_db.create_chunk_node_for_section()
 
     neo4j_db.add_embedding(label="Document")
     neo4j_db.add_embedding(label="Section")
     neo4j_db.create_vector_index(label="Document")
     neo4j_db.create_vector_index(label="Section")
+
+    # print(f"Finished loading {len(markdown)} pages to Neo4j")
 
 
 if __name__ == "__main__":
