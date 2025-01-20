@@ -39,7 +39,7 @@ def main():
     stack = [head]
     neo4j_db.set_document_node(head)
 
-    for i, page in enumerate(pdf):
+    for i, page in enumerate(pdf[80:300]):
         page_num = i + 1
         print(f"Processing page {page_num} of {len(pdf)}")
 

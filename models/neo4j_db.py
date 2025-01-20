@@ -39,7 +39,7 @@ class Neo4jDB:
                         for chunk in chunk_list:
                             create_chunk_cypher = f"""
                                 MERGE (chunk:Chunk {{id: $id}})
-                                ON CREATE SET chunk.level = $level, hierarchy = $hierarchy, chunk.title = $title, chunk.text = $text, chunk.page_num = $page_num
+                                ON CREATE SET chunk.level = $level, chunk.hierarchy = $hierarchy, chunk.title = $title, chunk.text = $text, chunk.page_num = $page_num
 
                                 WITH chunk
                                 MATCH (parent:{hierarchy} {{id: $parent_id}})
@@ -83,7 +83,7 @@ class Neo4jDB:
             )
 
     def set_section_node(self, section: Section) -> None:
-        if section.parent and section.hierarchy == HierarchyType.document:
+        if section.parent and section.parent.hierarchy == HierarchyType.document:
             set_section_cypher = f"""
                 MATCH (doc:Document {{id: $parent_id}})
                 MERGE (section:{section.hierarchy.value[1]} {{id: $id}})

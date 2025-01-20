@@ -87,7 +87,7 @@ def main():
             neo4j_db.set_document_node(node)
 
     # splitting chunks
-    neo4j_db.create_chunk_node_for_section()
+    neo4j_db.create_chunk_node()
 
     neo4j_db.add_embedding(label="Document")
     neo4j_db.add_embedding(label="Section")
