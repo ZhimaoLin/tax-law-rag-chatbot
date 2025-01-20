@@ -39,14 +39,10 @@ class Neo4jDB:
                     page_num = parent["page_num"]
                     hierarchy = parent["hierarchy"]
 
-                    print(f"Original text size: {len(text)}")
-
                     tokens = encoder.encode(text)
-
                     if len(tokens) >= 5000:
                         chunk_list = text_splitter.split_text(text)
                         for chunk in chunk_list:
-                            print(f"Chunk size: {len(chunk)}")
                             create_chunk_cypher = f"""
                                 MERGE (chunk:Chunk {{id: $id}})
                                 ON CREATE SET chunk.level = $level, chunk.hierarchy = $hierarchy, chunk.title = $title, chunk.text = $text, chunk.page_num = $page_num
