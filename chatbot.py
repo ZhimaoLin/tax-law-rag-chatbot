@@ -128,7 +128,6 @@ def main():
 
             Please only answer the question based on the following knowledge base. I put the source path and page number below each source. If you think that source is useful for the answer, please attach the source path and page number to the answer at the end (it can be multiple sources and pages).
             {neo4j_knowledge}
-            {pinecone_knowledge}
 
             Attach the source path and page number at the end of your answer if you think it is useful.
             If you do not have enough reliable source from the knowledge base, just leave the source part blank. Do not make up any information.
