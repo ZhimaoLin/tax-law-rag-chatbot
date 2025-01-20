@@ -2,12 +2,8 @@ from neo4j import GraphDatabase
 
 from config import Config
 from models.pdf_with_toc.section import Section
-
-
-# def connect_neo4j_db() -> None:
-#     kg = GraphDatabase.driver(Config.NEO4J_URI, auth=(Config.NEO4J_USERNAME, Config.NEO4J_PASSWORD))
-#     kg.verify_connectivity()
-#     return kg
+from models.tax_law.law_hierarchy import LawHierarchyType
+from models.tax_law.law_section import LawSection
 
 
 class Neo4jDB:
@@ -52,6 +48,55 @@ class Neo4jDB:
     # endregion
 
     # region Tax Law
+    def set_document_node_for_law_section(self, law_section: LawSection) -> None:
+        set_document_cypher = """
+            MERGE (doc:Document {id: $id})
+            SET doc.level = $level, doc.hierarchy_type = $hierarchy_type, doc.title = $title, doc.text = $text, doc.page_num = $page_num
+            RETURN doc
+        """
+        with self.kg.session(database=Config.NEO4J_DATABASE) as session:
+            session.run(
+                set_document_cypher,
+                id=str(law_section.id),
+                level=LawHierarchyType.document.value[0],
+                hierarchy_type=LawHierarchyType.document.value[1],
+                title=law_section.title,
+                text=law_section.text,
+                page_num=law_section.page_num,
+            )
+
+    def set_section_node(self, law_section: LawSection) -> None:
+        if law_section.parent and law_section.parent.hierarchy == LawHierarchyType.document:
+            set_section_cypher = f"""
+                MATCH (doc:Document {{id: $parent_id}})
+                MERGE (section:{law_section.hierarchy.value[1]} {{id: $id}})
+                SET section.level = $level, section.hierarchy_type = $hierarchy_type, section.title = $title, section.text = $text, section.page_num = $page_num
+                MERGE (doc)-[:HAS_SECTION]->(section)
+                RETURN section
+            """
+        elif law_section.parent and law_section.parent.hierarchy != LawHierarchyType.document:
+            set_section_cypher = f"""
+                MATCH (parent:{law_section.parent.hierarchy.value[1]} {{id: $parent_id}})
+                MERGE (section:{law_section.hierarchy.value[1]} {{id: $id}})
+                SET section.level = $level, section.hierarchy_type = $hierarchy_type, section.title = $title, section.text = $text, section.page_num = $page_num
+                MERGE (parent)-[:HAS_SECTION]->(section)
+                RETURN section
+            """
+        else:
+            raise ValueError("Section must have a parent")
+
+        with self.kg.session(database=Config.NEO4J_DATABASE) as session:
+            session.run(
+                set_section_cypher,
+                parent_id=str(law_section.parent.id),
+                id=str(law_section.id),
+                level=law_section.hierarchy.value[0],
+                hierarchy_type=law_section.hierarchy.value[1],
+                title=law_section.title,
+                text=law_section.text,
+                page_num=law_section.page_num,
+            )
+
     # endregion
 
     # region PDF with TOC
