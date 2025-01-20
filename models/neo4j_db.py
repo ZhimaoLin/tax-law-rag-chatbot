@@ -178,9 +178,9 @@ class Neo4jDB:
                 id = node[1]
                 level = node[2]
                 hierarchy = node[3]
-                title = node[3]
-                text = node[4]
-                page_num = node[5]
+                title = node[4]
+                text = node[5]
+                page_num = node[6]
 
                 search_result_list.append((score, id, level, hierarchy, title, text, page_num))
 
