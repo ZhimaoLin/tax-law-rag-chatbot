@@ -11,35 +11,6 @@ PDF_PATH = "./data/code.pdf"
 LLMSHERPA_API_URL = "http://localhost:5010/api/parseDocument?renderFormat=all"
 
 
-# def check_hierarchy_type(title: str) -> LawHierarchyType:
-#     if "subtitle" in title.lower():
-#         return LawHierarchyType.subtitle
-#     elif "chapter" in title.lower():
-#         return LawHierarchyType.chapter
-#     elif "subchapter" in title.lower():
-#         return LawHierarchyType.subchapter
-#     elif "part" in title.lower():
-#         return LawHierarchyType.part
-#     elif "§" in title:
-#         return LawHierarchyType.section
-#     elif "table of contents" in title.lower():
-#         return LawHierarchyType.table_of_contents
-#     elif "editorial notes" in title.lower():
-#         return LawHierarchyType.editorial_notes
-#     elif "amendments" in title.lower():
-#         return LawHierarchyType.amendments
-#     elif re.match(r"\([a-z]\) [A-Z0-9]+", title):
-#         return LawHierarchyType.section_l1
-#     elif re.match(r"\(\d+\) [A-Z0-9]+", title):
-#         return LawHierarchyType.section_l2
-#     elif re.match(r"\([A-Z]\) [A-Z0-9]+", title):
-#         return LawHierarchyType.section_l3
-#     elif re.match(r"\([i|v|x]+\) ", title):
-#         return LawHierarchyType.section_l4
-#     else:
-#         raise ValueError("Unknown Hierarchy Type")
-
-
 def split_by_header(regex: str, text: str, page_num: int) -> tuple[str, list[LawSection]]:
     match = re.split(regex, text)
     before = ""
@@ -85,8 +56,8 @@ def set_document_node(kg: Driver, law_section: LawSection) -> None:
         session.run(
             set_document_cypher,
             id=str(law_section.id),
-            level=LawHierarchyType.title.value[0],
-            hierarchy_type=LawHierarchyType.title.value[1],
+            level=LawHierarchyType.document.value[0],
+            hierarchy_type=LawHierarchyType.document.value[1],
             title=law_section.title,
             text=law_section.text,
             page_num=law_section.page_num,
@@ -94,7 +65,7 @@ def set_document_node(kg: Driver, law_section: LawSection) -> None:
 
 
 def set_section_node(kg: Driver, law_section: LawSection) -> None:
-    if law_section.parent and law_section.parent.hierarchy == LawHierarchyType.title:
+    if law_section.parent and law_section.parent.hierarchy == LawHierarchyType.document:
         set_section_cypher = f"""
             MATCH (doc:Document {{id: $parent_id}})
             MERGE (section:{law_section.hierarchy.value[1]} {{id: $id}})
@@ -102,7 +73,7 @@ def set_section_node(kg: Driver, law_section: LawSection) -> None:
             MERGE (doc)-[:HAS_SECTION]->(section)
             RETURN section
         """
-    elif law_section.parent and law_section.parent.hierarchy != LawHierarchyType.title:
+    elif law_section.parent and law_section.parent.hierarchy != LawHierarchyType.document:
         set_section_cypher = f"""
             MATCH (parent:{law_section.parent.hierarchy.value[1]} {{id: $parent_id}})
             MERGE (section:{law_section.hierarchy.value[1]} {{id: $id}})
@@ -132,7 +103,7 @@ def main():
     kg = connect_neo4j_db()
     pdf = pymupdf.open(PDF_PATH)
 
-    head = LawSection(hierarchy=LawHierarchyType.title, title="INTERNAL REVENUE TITLE", page_num=0)
+    head = LawSection(hierarchy=LawHierarchyType.document, title="INTERNAL REVENUE TITLE", page_num=0)
     stack = [head]
     set_document_node(kg, head)
 
@@ -159,7 +130,7 @@ def main():
 
     while stack:
         node = stack.pop()
-        if node.hierarchy == LawHierarchyType.title:
+        if node.hierarchy == LawHierarchyType.document:
             set_document_node(kg, node)
         else:
             set_section_node(kg, node)
