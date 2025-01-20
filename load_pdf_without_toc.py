@@ -6,7 +6,7 @@ from models.section import Section
 from models.hierarchy_type import HierarchyType
 
 
-PDF_PATH = "./data/code.pdf"
+PDF_PATH = "./data/test.pdf"
 
 
 def split_by_header(regex: str, text: str, page_num: int) -> tuple[str, list[Section]]:
@@ -39,7 +39,7 @@ def main():
     stack = [head]
     neo4j_db.set_document_node(head)
 
-    for i, page in enumerate(pdf[86:100]):
+    for i, page in enumerate(pdf):
         page_num = i + 1
         print(f"Processing page {page_num} of {len(pdf)}")
 

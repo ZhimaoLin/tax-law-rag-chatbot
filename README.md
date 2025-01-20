@@ -12,7 +12,7 @@ The main objective for this project is to experiment with Graph RAG and Vector-b
 
 ### Real world use case
 
-Leveraging Graph RAG can significantly enhance the efficiency of retrieving relevant information from extensive legal documents for lawyers. Also, the actual law is well structured, so that we can leverage the well defined structure and build the Graph Knowledge Base.
+Leveraging Graph RAG can significantly improve the efficiency of retrieving relevant information from extensive legal documents for lawyers. Legal texts are inherently well-structured, making it a good fit for a Graph Knowledge Base. This structured knowledge base enables more precise and contextually relevant retrieval, empowering lawyers to access critical information quickly and effectively.
 
 ## PDF Parser
 
@@ -29,6 +29,8 @@ Here are some other PDF parse that you might consider:
 - **LayoutPDFReader**
   - This is the smartest pattern-based PDF parser. Without using any machine learning, it can meaningfully divide PDF into sections while overcoming the challenge of page break. However, it has issues with multi-column PDFs. 
   - [https://github.com/nlmatics/llmsherpa](https://github.com/nlmatics/llmsherpa)
+
+Based on my experience, if you really want to perfectly parse a PDF, I think this can be an another big research project.
 
 ## How to run the code?
 

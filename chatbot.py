@@ -28,7 +28,7 @@ def get_pinecone_knowledge_base(question: str, openai_client: OpenAI, pinecone_d
     result = pinecone_db.query(query_embedding=question_embedding, top_k=3)
 
     knowledge_base_list = []
-    for chunk in result:
+    for chunk in result.get("matches", []):
         text = chunk["metadata"]["text"]
         page_num = chunk["metadata"]["page_num"]
         knowledge_base_list.append(f"Text: {text}\nPage Number: {page_num}")
@@ -104,7 +104,6 @@ def main():
     while True:
         print("==========================================================================")
         question = input("Enter a question or type 'exit' to quit: ")
-        question = "How is the tax imposed for married couples?"
         if question.lower() == "exit":
             return
 

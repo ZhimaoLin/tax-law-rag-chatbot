@@ -6,7 +6,7 @@ from config import Config
 from models.neo4j_db import connect_neo4j_db
 
 
-CSV_FILE = "./data/tax_data.csv"
+CSV_FILE = "./data/test.csv"
 
 
 def main():

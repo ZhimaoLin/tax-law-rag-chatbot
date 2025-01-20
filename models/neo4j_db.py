@@ -1,5 +1,6 @@
 from langchain_text_splitters import CharacterTextSplitter
 from neo4j import GraphDatabase
+import tiktoken
 import uuid
 
 from config import Config
@@ -15,6 +16,13 @@ class Neo4jDB:
 
     # region Split Text
     def create_chunk_node(self) -> None:
+        text_splitter = CharacterTextSplitter.from_tiktoken_encoder(
+            encoding_name=Config.TOKEN_ENCODING,
+            chunk_size=Config.CHUNK_SIZE,
+            chunk_overlap=Config.OVERLAP_SIZE,
+        )
+        encoder = tiktoken.get_encoding("o200k_base")
+
         for hierarchy in HierarchyType:
             query_all_law_section = f"""
                 MATCH (section:{hierarchy.value[1]})
@@ -31,14 +39,14 @@ class Neo4jDB:
                     page_num = parent["page_num"]
                     hierarchy = parent["hierarchy"]
 
-                    if len(text) > 10000:
-                        text_splitter = CharacterTextSplitter.from_tiktoken_encoder(
-                            encoding_name=Config.TOKEN_ENCODING,
-                            chunk_size=Config.CHUNK_SIZE,
-                            chunk_overlap=Config.OVERLAP_SIZE,
-                        )
+                    print(f"Original text size: {len(text)}")
+
+                    tokens = encoder.encode(text)
+
+                    if len(tokens) >= 5000:
                         chunk_list = text_splitter.split_text(text)
                         for chunk in chunk_list:
+                            print(f"Chunk size: {len(chunk)}")
                             create_chunk_cypher = f"""
                                 MERGE (chunk:Chunk {{id: $id}})
                                 ON CREATE SET chunk.level = $level, chunk.hierarchy = $hierarchy, chunk.title = $title, chunk.text = $text, chunk.page_num = $page_num

@@ -6,7 +6,7 @@ from models.section import Section
 from models.hierarchy_type import HierarchyType
 
 
-PDF_PATH = "./data/instruction.pdf"
+PDF_PATH = "./data/test.pdf"
 
 
 def find_markdown_header(regex: str, text: str) -> tuple[int, int] | None:
